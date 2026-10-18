@@ -70,6 +70,7 @@ In Claude: **Settings → Connectors → Add custom connector** and paste the ad
 For image uploads from Claude's sandbox, also allow the Worker's domain there (claude.ai **Settings → Capabilities → Domain allowlist**, and the allowed domains of a cloud environment).
 
 ## Security notes
+- `GET /health` shows which settings exist and their lengths (never values), plus the first 8 hex characters of the SHA-256 of `CONNECTOR_SECRET`, so you can check that the Worker has the secret you think it has. In PowerShell: `$h=[Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($secret)); -join ($h[0..3] | % { $_.ToString('x2') })`
 - Wrong path → `404`. `GET`/`DELETE` on the endpoint → `405`.
 - If the address leaks, change `CONNECTOR_SECRET`; nothing else is affected.
 - If Discord answers `401`, the token was reset: update `DISCORD_TOKEN`.

@@ -542,6 +542,29 @@ async function handleMcp(request, env) {
   return out ? json(out) : new Response(null, { status: 202 });
 }
 
+// Setup check: which settings exist and how long they are. Never returns a value; for
+// CONNECTOR_SECRET only the first 8 hex characters of its SHA-256, so you can compare it
+// with a hash of your local copy (useless for guessing a 256-bit random secret).
+async function handleHealth(env) {
+  const fp = async (v) => {
+    const h = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(v)));
+    return [...h.slice(0, 4)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  };
+  const info = (v) => ({ set: !!v, length: v ? v.length : 0 });
+  const secret = env.CONNECTOR_SECRET;
+  return json({
+    CONNECTOR_SECRET: {
+      ...info(secret),
+      url_safe: !!secret && /^[A-Za-z0-9_-]+$/.test(secret),
+      long_enough: !!secret && secret.length >= 32,
+      sha256_first8: secret ? await fp(secret) : null,
+    },
+    UPLOAD_SIGNING_KEY: info(env.UPLOAD_SIGNING_KEY),
+    DISCORD_TOKEN: info(env.DISCORD_TOKEN),
+    ALLOWED_IDS: (env.ALLOWED_IDS || "").split(",").map((s) => s.trim()).filter(Boolean).length,
+  });
+}
+
 export default {
   async fetch(request, rawEnv) {
     // Pasted secrets often carry an invisible trailing newline or space; ignore it.
@@ -556,6 +579,7 @@ export default {
     };
     const url = new URL(request.url);
     if (url.pathname === "/upload") return handleUpload(request, env);
+    if (url.pathname === "/health" && request.method === "GET") return handleHealth(env);
     const m = url.pathname.match(/^\/mcp\/([^/]+)\/?$/);
     if (m && env.CONNECTOR_SECRET && env.CONNECTOR_SECRET.length >= 32 && timingSafeEqual(m[1], env.CONNECTOR_SECRET)) return handleMcp(request, env);
     return new Response("Not found", { status: 404 });          // everything else, including wrong secrets, looks the same
