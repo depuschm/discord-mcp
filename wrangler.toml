@@ -1,0 +1,7 @@
+name = "discord-mcp"
+main = "worker.js"
+compatibility_date = "2025-09-01"
+
+# Keep the variables set in the Cloudflare dashboard (ALLOWED_IDS) when deploying from GitHub.
+# Secrets (DISCORD_TOKEN, CONNECTOR_SECRET, UPLOAD_SIGNING_KEY) are never touched by deploys.
+keep_vars = true
