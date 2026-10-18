@@ -27,7 +27,21 @@ MCP tool calls can't carry files well, so `discord_prepare_upload` returns a lin
 ## Setup
 
 ### 1. A Discord bot
-In the [Discord Developer Portal](https://discord.com/developers/applications): **New Application** → **Bot** → **Reset Token** and keep the token. No privileged intents are needed. Invite it via **OAuth2 → URL Generator** with the `bot` scope and these permissions: View Channels, Send Messages, Send Messages in Threads, Embed Links, Attach Files, Read Message History.
+In the [Discord Developer Portal](https://discord.com/developers/applications):
+
+1. **New Application**, give it a name (and optionally an icon and description under **General Information**).
+2. **Installation**: set **Install Link** to **None** and keep only **Guild Install** checked. (Discord won't let you make a bot private while it has an install link.)
+3. **Bot**:
+   - Set the bot's username.
+   - Turn **Public Bot** off, so only you can add it to servers.
+   - Leave **Requires OAuth2 Code Grant** off.
+   - Leave all **Privileged Gateway Intents** off; the server only uses Discord's REST API.
+   - **Reset Token** and keep the token somewhere safe. Discord shows it only once.
+4. **OAuth2 → URL Generator**: scope `bot`, integration type **Guild Install**, and these permissions only:
+   View Channels, Send Messages, Send Messages in Threads, Embed Links, Attach Files, Read Message History.
+   Open the generated URL and add the bot to your server.
+
+Give it no moderation permissions (Manage Messages, Manage Threads, …): the bot can always edit its own messages and posts without them, and without them it can't remove anything written by others. You can limit it further per channel with the bot's role in your server's channel settings.
 
 ### 2. Deploy the Worker
 Either fork this repository and connect it in the Cloudflare dashboard (**Workers & Pages → Create → Continue with GitHub**, deploy command `npx wrangler deploy`), or create a "Hello World" Worker and paste `worker.js` into the editor. The Worker name must match `name` in `wrangler.toml` when deploying from Git.
