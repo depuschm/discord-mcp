@@ -543,7 +543,17 @@ async function handleMcp(request, env) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, rawEnv) {
+    // Pasted secrets often carry an invisible trailing newline or space; ignore it.
+    // The token may also have been pasted with its "Bot " prefix.
+    const clean = (v) => (typeof v === "string" ? v.trim() : v);
+    const env = {
+      ...rawEnv,
+      CONNECTOR_SECRET: clean(rawEnv.CONNECTOR_SECRET),
+      UPLOAD_SIGNING_KEY: clean(rawEnv.UPLOAD_SIGNING_KEY),
+      DISCORD_TOKEN: clean(rawEnv.DISCORD_TOKEN)?.replace(/^Bot\s+/i, ""),
+      ALLOWED_IDS: clean(rawEnv.ALLOWED_IDS),
+    };
     const url = new URL(request.url);
     if (url.pathname === "/upload") return handleUpload(request, env);
     const m = url.pathname.match(/^\/mcp\/([^/]+)\/?$/);

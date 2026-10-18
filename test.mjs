@@ -95,3 +95,5 @@ res = await worker.fetch(new Request(up.upload_url,{method:'POST',body:fd}), env
 Date.now = realNow;
 r = await tool({...envLocked, DISCORD_TOKEN:''},'discord_whoami'); check('missing token -> clear error', r.err && r.text.includes('DISCORD_TOKEN'));
 check('short secret refused', (await rpc({...envOpen,CONNECTOR_SECRET:'short'},'ping',{},1,'/mcp/short')).status===404);
+check('secret with pasted newline still works', (await rpc({...envOpen,CONNECTOR_SECRET:SECRET+'\r\n'},'tools/list')).status===200);
+r = await tool({...envOpen,DISCORD_TOKEN:'Bot TESTTOKEN\n'},'discord_whoami'); check('token pasted with "Bot " and newline still works', !r.err && r.text.includes('example_bot') && calls.at(-1).auth==='Bot TESTTOKEN');
