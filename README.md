@@ -47,16 +47,29 @@ Give it no moderation permissions (Manage Messages, Manage Threads, …): the bo
 Either fork this repository and connect it in the Cloudflare dashboard (**Workers & Pages → Create → Continue with GitHub**, deploy command `npx wrangler deploy`), or create a "Hello World" Worker and paste `worker.js` into the editor. The Worker name must match `name` in `wrangler.toml` when deploying from Git.
 
 ### 3. Settings
-Worker → **Settings → Variables and Secrets**:
+Worker → **Settings → Variables and Secrets** (the runtime section, *not* **Settings → Build → Variables and secrets**, which the running Worker never sees). Add them for **Production**, then **Deploy**:
 
 | Name | Type | Value |
 |---|---|---|
 | `DISCORD_TOKEN` | Secret | the bot token (without `Bot ` in front) |
-| `CONNECTOR_SECRET` | Secret | a random string, at least 32 letters/digits; it becomes part of the address |
+| `CONNECTOR_SECRET` | Secret | a random string of at least 32 letters/digits only; it becomes part of the address, so symbols like `/ # ? % +` break it |
 | `UPLOAD_SIGNING_KEY` | Secret | another random string, at least 32 characters |
 | `ALLOWED_IDS` | Text | optional: comma-separated server and/or channel IDs |
 
-`ALLOWED_IDS`: a server ID allows all its channels; a channel or category ID also allows its threads and forum posts. Empty means everything the bot can see. `wrangler.toml` sets `keep_vars = true`, so Git deploys don't overwrite it.
+`ALLOWED_IDS`: a server ID allows all its channels; a channel or category ID also allows its threads and forum posts. Empty means everything the bot can see. `wrangler.toml` sets `keep_vars = true`, so Git deploys don't overwrite it; you can ignore the dashboard's hint to add it to your Wrangler configuration. Whitespace around pasted values is ignored.
+
+Generating a secret (64 hex characters), with any of:
+
+```sh
+openssl rand -hex 32
+```
+```powershell
+$b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); -join ($b | % { $_.ToString('x2') })
+```
+```js
+// browser console
+[...crypto.getRandomValues(new Uint8Array(32))].map(b => b.toString(16).padStart(2, '0')).join('')
+```
 
 ### 4. Connect your assistant
 The MCP endpoint (streamable HTTP, no OAuth) is:
@@ -65,15 +78,30 @@ The MCP endpoint (streamable HTTP, no OAuth) is:
 https://<worker-name>.<your-subdomain>.workers.dev/mcp/<CONNECTOR_SECRET>
 ```
 
-In Claude: **Settings → Connectors → Add custom connector** and paste the address. Treat it like a password: whoever has it can post as your bot.
+Quick test before connecting (should list 11 tools):
 
-For image uploads from Claude's sandbox, also allow the Worker's domain there (claude.ai **Settings → Capabilities → Domain allowlist**, and the allowed domains of a cloud environment).
+```sh
+curl -s -X POST "https://<worker-name>.<your-subdomain>.workers.dev/mcp/<CONNECTOR_SECRET>" \
+  -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
+In Claude: **Settings → Connectors → Add custom connector** and paste the address. Claude reports that it couldn't determine how the server signs in, because there is no sign-in: choose **Continue anyway**, leave the OAuth fields empty, then **Connect**. Treat the address like a password: whoever has it can post as your bot.
+
+For image uploads from Claude's sandbox, also allow the Worker's domain there (claude.ai **Settings → Capabilities → Domain allowlist**, and the allowed domains of a cloud environment). This applies to chats started afterwards.
+
+## Troubleshooting
+- **`Not found` at the right address:** open `https://<worker-name>.<your-subdomain>.workers.dev/health`. It shows which settings exist and their lengths (never values), plus the first 8 hex characters of the SHA-256 of `CONNECTOR_SECRET`, to compare with your copy:
+  - everything `"set": false` → the variables were added under **Build**, or not deployed; add them under **Settings → Variables and Secrets**.
+  - fingerprint differs → the Worker has a different secret than your address; paste it again.
+  - fingerprint of your copy in PowerShell: `$h=[Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($secret)); -join ($h[0..3] | % { $_.ToString('x2') })`, or `printf %s "$SECRET" | sha256sum | cut -c1-8`.
+- **Discord answers `401`:** the token was reset or is wrong; update `DISCORD_TOKEN`.
+- **"not on this connector's allow-list":** add the server or channel ID to `ALLOWED_IDS`.
+- **Image upload refused by Claude's sandbox:** the Worker's domain isn't in the allowlist (see step 4), or the chat was started before you added it.
 
 ## Security notes
-- `GET /health` shows which settings exist and their lengths (never values), plus the first 8 hex characters of the SHA-256 of `CONNECTOR_SECRET`, so you can check that the Worker has the secret you think it has. In PowerShell: `$h=[Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($secret)); -join ($h[0..3] | % { $_.ToString('x2') })`
-- Wrong path → `404`. `GET`/`DELETE` on the endpoint → `405`.
-- If the address leaks, change `CONNECTOR_SECRET`; nothing else is affected.
-- If Discord answers `401`, the token was reset: update `DISCORD_TOKEN`.
+- Without the secret, every path answers `404`, except `/health` and `/upload` (which rejects anything without a valid, unexpired signed link). `GET`/`DELETE` on the endpoint → `405`.
+- The Worker logs nothing and never returns secret values; `/health` only reveals lengths and a short fingerprint.
+- If the address leaks, change `CONNECTOR_SECRET` and update the connector; nothing else is affected.
 - Mentions (`@everyone`, roles, users) never ping.
 
 ## Tests
