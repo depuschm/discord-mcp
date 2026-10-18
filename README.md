@@ -52,9 +52,10 @@ Worker → **Settings → Variables and Secrets** (the runtime section, *not* **
 | Name | Type | Value |
 |---|---|---|
 | `DISCORD_TOKEN` | Secret | the bot token (without `Bot ` in front) |
-| `CONNECTOR_SECRET` | Secret | a random string of at least 32 letters/digits only; it becomes part of the address, so symbols like `/ # ? % +` break it |
+| `CONNECTOR_SECRET` | Secret | a random string of at least 32 letters/digits only (if you put it in the URL, symbols like `/ # ? % +` break it) |
 | `UPLOAD_SIGNING_KEY` | Secret | another random string, at least 32 characters |
 | `ALLOWED_IDS` | Text | optional: comma-separated server and/or channel IDs |
+| `DISABLE_URL_SECRET` | Text | optional: `true` = accept the secret only as a header, not in the URL (see step 4) |
 
 `ALLOWED_IDS`: a server ID allows all its channels; a channel or category ID also allows its threads and forum posts. Empty means everything the bot can see. `wrangler.toml` sets `keep_vars = true`, so Git deploys don't overwrite it; you can ignore the dashboard's hint to add it to your Wrangler configuration. Whitespace around pasted values is ignored.
 
@@ -72,25 +73,33 @@ $b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create
 ```
 
 ### 4. Connect your assistant
-The MCP endpoint (streamable HTTP, no OAuth) is:
+The MCP endpoint (streamable HTTP) needs `CONNECTOR_SECRET`, in one of two ways:
+
+**A. In a header (preferred).** Endpoint `https://<worker-name>.<your-subdomain>.workers.dev/mcp` with the header
+`Authorization: Bearer <CONNECTOR_SECRET>` (or `X-API-Key: <CONNECTOR_SECRET>`). The secret then never appears in a URL, so it can't end up in logs or screenshots of addresses. Use this whenever your client lets you set request headers. In Claude, this is the **Request headers** section of **Settings → Connectors → Add custom connector** (currently a beta that not every account has).
+
+**B. In the URL (fallback).** For clients that only take a URL:
 
 ```
 https://<worker-name>.<your-subdomain>.workers.dev/mcp/<CONNECTOR_SECRET>
 ```
 
+Treat this address like a password: whoever has it can post as your bot. Once all your clients use the header, set `DISABLE_URL_SECRET` to `true` so the URL form stops working.
+
 Quick test before connecting (should list 11 tools):
 
 ```sh
-curl -s -X POST "https://<worker-name>.<your-subdomain>.workers.dev/mcp/<CONNECTOR_SECRET>" \
+curl -s -X POST "https://<worker-name>.<your-subdomain>.workers.dev/mcp" \
+  -H "Authorization: Bearer <CONNECTOR_SECRET>" \
   -H "Content-Type: application/json" -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
-In Claude: **Settings → Connectors → Add custom connector** and paste the address. Claude reports that it couldn't determine how the server signs in, because there is no sign-in: choose **Continue anyway**, leave the OAuth fields empty, then **Connect**. Treat the address like a password: whoever has it can post as your bot.
+In Claude: **Settings → Connectors → Add custom connector**, enter the address (and the header, for A). If Claude reports that it couldn't determine how the server signs in, that's expected, because there is no OAuth sign-in: choose **Continue anyway**, leave the OAuth fields empty, then **Connect**.
 
 For image uploads from Claude's sandbox, also allow the Worker's domain there (claude.ai **Settings → Capabilities → Domain allowlist**, and the allowed domains of a cloud environment). This applies to chats started afterwards.
 
 ## Troubleshooting
-- **`Not found` at the right address:** open `https://<worker-name>.<your-subdomain>.workers.dev/health`. It shows which settings exist and their lengths (never values), plus the first 8 hex characters of the SHA-256 of `CONNECTOR_SECRET`, to compare with your copy:
+- **`Not found` at the right address or with the right header:** open `https://<worker-name>.<your-subdomain>.workers.dev/health`. It shows which settings exist and their lengths (never values), plus the first 8 hex characters of the SHA-256 of `CONNECTOR_SECRET`, to compare with your copy:
   - everything `"set": false` → the variables were added under **Build**, or not deployed; add them under **Settings → Variables and Secrets**.
   - fingerprint differs → the Worker has a different secret than your address; paste it again.
   - fingerprint of your copy in PowerShell: `$h=[Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($secret)); -join ($h[0..3] | % { $_.ToString('x2') })`, or `printf %s "$SECRET" | sha256sum | cut -c1-8`.
@@ -99,9 +108,10 @@ For image uploads from Claude's sandbox, also allow the Worker's domain there (c
 - **Image upload refused by Claude's sandbox:** the Worker's domain isn't in the allowlist (see step 4), or the chat was started before you added it.
 
 ## Security notes
-- Without the secret, every path answers `404`, except `/health` and `/upload` (which rejects anything without a valid, unexpired signed link). `GET`/`DELETE` on the endpoint → `405`.
+- Without the secret (wrong or missing header, wrong path), every request answers `404`, except `/health` and `/upload` (which rejects anything without a valid, unexpired signed link). `GET`/`DELETE` on the endpoint → `405`.
 - The Worker logs nothing and never returns secret values; `/health` only reveals lengths and a short fingerprint.
-- If the address leaks, change `CONNECTOR_SECRET` and update the connector; nothing else is affected.
+- If the secret leaks, change `CONNECTOR_SECRET` and update the connector; nothing else is affected.
+- The header form is the safer choice: secrets in URLs tend to end up in logs. Claude's docs advise against accepting credentials in URLs.
 - Mentions (`@everyone`, roles, users) never ping.
 
 ## Tests

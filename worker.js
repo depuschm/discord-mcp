@@ -2,18 +2,21 @@
  * Discord connector for Claude: a small MCP server for Cloudflare Workers.
  *
  * - Speaks MCP over "streamable HTTP" (stateless JSON responses), no dependencies.
- * - Reachable only under a secret path:  https://<worker>/mcp/<CONNECTOR_SECRET>
+ * - Needs CONNECTOR_SECRET: preferably as a header on https://<worker>/mcp
+ *   ("Authorization: Bearer <secret>" or "X-API-Key: <secret>"), or in the path
+ *   https://<worker>/mcp/<secret> (turn that off with DISABLE_URL_SECRET=true).
  * - Talks to Discord as your bot; the bot token is a Cloudflare secret (DISCORD_TOKEN).
  * - There is deliberately NO delete tool, and no tool that locks, archives or moderates.
  * - Optional allow-list (ALLOWED_IDS): server and/or channel IDs the connector may touch.
  *
  * Settings (Cloudflare dashboard > Worker > Settings > Variables and Secrets):
  *   DISCORD_TOKEN       secret  the bot token
- *   CONNECTOR_SECRET    secret  long random string; part of the connector URL
+ *   CONNECTOR_SECRET    secret  long random string; sent as a header (or in the URL path)
  *   UPLOAD_SIGNING_KEY  secret  long random string; signs the short-lived upload links
  *   ALLOWED_IDS         text    optional, comma-separated server/channel IDs. Empty = everything the bot can see.
  *                               A server ID allows all its channels; a channel ID also allows its threads/posts;
  *                               a category ID allows the channels in it.
+ *   DISABLE_URL_SECRET  text    optional, "true" = accept the secret only as a header, not in the URL path.
  */
 
 const API = "https://discord.com/api/v10";
@@ -542,6 +545,18 @@ async function handleMcp(request, env) {
   return out ? json(out) : new Response(null, { status: 202 });
 }
 
+function headerSecret(request) {
+  const auth = request.headers.get("Authorization");
+  const bearer = auth && auth.match(/^Bearer\s+(.+)$/i);
+  if (bearer) return bearer[1].trim();
+  const key = request.headers.get("X-API-Key");
+  return key ? key.trim() : null;
+}
+
+function urlSecretDisabled(env) {
+  return /^(1|true|yes|on)$/i.test(String(env.DISABLE_URL_SECRET || "").trim());
+}
+
 // Setup check: which settings exist and how long they are. Never returns a value; for
 // CONNECTOR_SECRET only the first 8 hex characters of its SHA-256, so you can compare it
 // with a hash of your local copy (useless for guessing a 256-bit random secret).
@@ -562,6 +577,7 @@ async function handleHealth(env) {
     UPLOAD_SIGNING_KEY: info(env.UPLOAD_SIGNING_KEY),
     DISCORD_TOKEN: info(env.DISCORD_TOKEN),
     ALLOWED_IDS: (env.ALLOWED_IDS || "").split(",").map((s) => s.trim()).filter(Boolean).length,
+    secret_in_url: urlSecretDisabled(env) ? "disabled" : "enabled",
   });
 }
 
@@ -580,8 +596,18 @@ export default {
     const url = new URL(request.url);
     if (url.pathname === "/upload") return handleUpload(request, env);
     if (url.pathname === "/health" && request.method === "GET") return handleHealth(env);
+
+    const secretOk = (given) =>
+      !!given && !!env.CONNECTOR_SECRET && env.CONNECTOR_SECRET.length >= 32 && timingSafeEqual(given, env.CONNECTOR_SECRET);
+
+    // Preferred: https://<worker>/mcp with the secret in a header
+    // ("Authorization: Bearer <secret>" or "X-API-Key: <secret>").
+    if (/^\/mcp\/?$/.test(url.pathname) && secretOk(headerSecret(request))) return handleMcp(request, env);
+
+    // Legacy: secret in the path, https://<worker>/mcp/<secret>. Turn off with DISABLE_URL_SECRET=true.
     const m = url.pathname.match(/^\/mcp\/([^/]+)\/?$/);
-    if (m && env.CONNECTOR_SECRET && env.CONNECTOR_SECRET.length >= 32 && timingSafeEqual(m[1], env.CONNECTOR_SECRET)) return handleMcp(request, env);
+    if (m && !urlSecretDisabled(env) && secretOk(m[1])) return handleMcp(request, env);
+
     return new Response("Not found", { status: 404 });          // everything else, including wrong secrets, looks the same
   },
 };

@@ -97,5 +97,17 @@ r = await tool({...envLocked, DISCORD_TOKEN:''},'discord_whoami'); check('missin
 check('short secret refused', (await rpc({...envOpen,CONNECTOR_SECRET:'short'},'ping',{},1,'/mcp/short')).status===404);
 { const h = await (await worker.fetch(new Request(base+'/health'),envOpen)).json(); const s = JSON.stringify(h);
   check('health shows settings without values', h.CONNECTOR_SECRET.set && h.CONNECTOR_SECRET.length===40 && h.CONNECTOR_SECRET.sha256_first8.length===8 && h.DISCORD_TOKEN.set && !s.includes(SECRET) && !s.includes('TESTTOKEN') && !s.includes('kkkk')); }
+{ const hdr = (h, path='/mcp') => worker.fetch(new Request(base+path,{method:'POST',headers:{'Content-Type':'application/json',...h},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list'})}),envOpen);
+  const hdrEnv = (env, h, path='/mcp') => worker.fetch(new Request(base+path,{method:'POST',headers:{'Content-Type':'application/json',...h},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list'})}),env);
+  check('Bearer header works', (await hdr({Authorization:'Bearer '+SECRET})).status===200);
+  check('X-API-Key header works', (await hdr({'X-API-Key':SECRET})).status===200);
+  check('wrong header -> 404', (await hdr({Authorization:'Bearer wrong'})).status===404);
+  check('no header on /mcp -> 404', (await hdr({})).status===404);
+  check('header does not open other paths', (await hdr({Authorization:'Bearer '+SECRET},'/mcp/other')).status===404);
+  const off = {...envOpen, DISABLE_URL_SECRET:'true'};
+  check('DISABLE_URL_SECRET blocks secret in path', (await rpc(off,'tools/list')).status===404);
+  check('DISABLE_URL_SECRET keeps header working', (await hdrEnv(off,{Authorization:'Bearer '+SECRET})).status===200);
+  const h1 = await (await worker.fetch(new Request(base+'/health'),off)).json();
+  check('health reports url secret disabled', h1.secret_in_url==='disabled'); }
 check('secret with pasted newline still works', (await rpc({...envOpen,CONNECTOR_SECRET:SECRET+'\r\n'},'tools/list')).status===200);
 r = await tool({...envOpen,DISCORD_TOKEN:'Bot TESTTOKEN\n'},'discord_whoami'); check('token pasted with "Bot " and newline still works', !r.err && r.text.includes('example_bot') && calls.at(-1).auth==='Bot TESTTOKEN');
